@@ -14,14 +14,14 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 
 export default function Home() {
   usePageTitle('');
-  const { getSetting, getActiveBanners } = useCMS();
+  const { getActiveBanners, config } = useCMS();
   const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
   const [featuredCategories, setFeaturedCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const heroSlides = [
-    { src: '/hero-1.png', position: '50% 40%' },
-    { src: '/hero-2.png', position: '50% 35%' },
-  ];
+  const heroSlides =
+    config.hero.slides.length > 0
+      ? config.hero.slides
+      : [{ src: '/hero-1.png', position: '50% 40%' }];
   const [currentHeroSlide, setCurrentHeroSlide] = useState(0);
 
   useEffect(() => {
@@ -67,16 +67,14 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [heroSlides.length]);
 
-  const heroHeadline =
-    getSetting('hero_headline') || 'Quality Products, Sourced Directly for You';
-  const heroSubheadline =
-    getSetting('hero_subheadline') ||
-    'We leverage a global network of trusted manufacturers and suppliers to bring you quality products at the best possible prices.';
-  const heroPrimaryText = getSetting('hero_primary_btn_text') || 'Shop Now';
-  const heroPrimaryLink = getSetting('hero_primary_btn_link') || '/shop';
-  const heroSecondaryText =
-    getSetting('hero_secondary_btn_text') || 'Browse Collections';
-  const heroSecondaryLink = getSetting('hero_secondary_btn_link') || '/shop';
+  const heroBadge = config.hero.badge;
+  const heroHeadline = config.hero.headline;
+  const heroSubheadline = config.hero.subheadline;
+  const heroPrimaryText = config.hero.primaryButtonText;
+  const heroPrimaryLink = config.hero.primaryButtonLink;
+  const heroSecondaryText = config.hero.secondaryButtonText;
+  const heroSecondaryLink = config.hero.secondaryButtonLink;
+  const heroOverlay = Math.min(80, Math.max(0, config.hero.overlayOpacity)) / 100;
 
   const activeBanners = getActiveBanners('top');
 
@@ -173,11 +171,17 @@ export default function Home() {
             </div>
           ))}
         </div>
-        <div className="absolute inset-0 bg-black/30" aria-hidden="true" />
+        <div
+          className="absolute inset-0 bg-black"
+          style={{ opacity: heroOverlay }}
+          aria-hidden="true"
+        />
         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 md:py-20 text-center">
-          <span className="inline-flex items-center rounded-full bg-white/15 border border-white/25 px-3 py-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-white/95 mb-4 sm:mb-5">
-            ShopWithGG · Smart Sourcing
-          </span>
+          {heroBadge && (
+            <span className="inline-flex items-center rounded-full bg-white/15 border border-white/25 px-3 py-1 sm:px-4 sm:py-1.5 text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.2em] sm:tracking-[0.25em] text-white/95 mb-4 sm:mb-5">
+              {heroBadge}
+            </span>
+          )}
           <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-[3.25rem] font-extrabold leading-tight text-white drop-shadow-sm max-w-3xl mx-auto">
             {heroHeadline}
           </h1>
@@ -192,12 +196,14 @@ export default function Home() {
               {heroPrimaryText}
               <i className="ri-arrow-right-up-line ml-2 text-base" />
             </Link>
-            <Link
-              href={heroSecondaryLink}
-              className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border-2 border-white/50 px-6 py-2.5 sm:px-9 sm:py-3 text-sm sm:text-base font-semibold text-white hover:bg-white hover:text-gray-900 transition-colors"
-            >
-              {heroSecondaryText}
-            </Link>
+            {heroSecondaryText && (
+              <Link
+                href={heroSecondaryLink}
+                className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border-2 border-white/50 px-6 py-2.5 sm:px-9 sm:py-3 text-sm sm:text-base font-semibold text-white hover:bg-white hover:text-gray-900 transition-colors"
+              >
+                {heroSecondaryText}
+              </Link>
+            )}
           </div>
           <div className="mt-5 flex items-center justify-center gap-2">
             {heroSlides.map((slide, index) => (

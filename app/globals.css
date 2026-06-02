@@ -4,6 +4,24 @@
 @tailwind utilities;
 
 /* ========================================
+   THEME TOKENS (defaults)
+   Overridden at runtime by the CMS via an injected <style id="theme-vars">
+   in the root layout. These defaults guarantee the site is themed even
+   before that style is parsed.
+   ======================================== */
+:root {
+  --color-primary: #2C1D00;
+  --color-secondary: #AB9462;
+  --color-accent: #FFCC00;
+  --brand-brown: #2C1D00;
+  --brand-carton: #AB9462;
+  --brand-purple: #AB9462;
+  --brand-gold: #FFCC00;
+  --font-sans: var(--font-montserrat), system-ui, sans-serif;
+  --font-display: var(--font-montserrat), system-ui, sans-serif;
+}
+
+/* ========================================
    ANIMATIONS & EFFECTS
    ======================================== */
 

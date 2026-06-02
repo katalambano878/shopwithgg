@@ -1,7 +1,13 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import {
+    DEFAULT_SITE_CONFIG,
+    SiteConfig,
+    configToSettings,
+    normalizeSiteConfig,
+    themeVarMap,
+} from '@/lib/site-config';
 
 interface SiteSettings {
     site_name: string;
@@ -53,6 +59,7 @@ interface Banner {
 
 interface CMSContextType {
     settings: SiteSettings;
+    config: SiteConfig;
     content: CMSContent[];
     banners: Banner[];
     loading: boolean;
@@ -80,6 +87,7 @@ const defaultSettings: SiteSettings = {
 
 const CMSContext = createContext<CMSContextType>({
     settings: defaultSettings,
+    config: DEFAULT_SITE_CONFIG,
     content: [],
     banners: [],
     loading: true,
@@ -90,30 +98,38 @@ const CMSContext = createContext<CMSContextType>({
 });
 
 export function CMSProvider({ children }: { children: ReactNode }) {
-    const [settings, setSettings] = useState<SiteSettings>({
-        site_name: 'ShopWithGG',
-        site_tagline: 'Your trusted sourcing and procurement partner.',
-        site_logo: '/shopwithgg-logo.png',
-        contact_email: 'hello@shopwithgg.com',
-        contact_phone: '08071363568',
-        contact_address: 'Lagos, Nigeria',
-        social_facebook: '',
-        social_instagram: '_shopwithgg_',
-        social_twitter: '',
-        primary_color: '#FBF6F2',
-        secondary_color: '#A14F57',
-        currency: 'NGN',
-        currency_symbol: '₦',
-    });
-    const [content, setContent] = useState<CMSContent[]>([]);
-    const [banners, setBanners] = useState<Banner[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [config, setConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
+    const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
+    const [content] = useState<CMSContent[]>([]);
+    const [banners] = useState<Banner[]>([]);
+    const [loading, setLoading] = useState(true);
 
-    // CMS Fetching Logic Removed - Content is now managed in code.
-    const fetchCMSData = async () => { };
+    // Pulls the live branding/theme/hero config the admin manages under
+    // Settings. Colours + fonts are already applied at SSR (root layout); this
+    // hydrates hero copy, site name, logo, etc. for client components.
+    const fetchCMSData = async () => {
+        try {
+            const res = await fetch('/api/site-config', { cache: 'no-store' });
+            if (!res.ok) return;
+            const data = await res.json();
+            const merged = normalizeSiteConfig(data);
+            setConfig(merged);
+            setSettings((prev) => ({ ...prev, ...configToSettings(merged) }));
+            // Apply the live theme at runtime so colour/font changes take effect
+            // immediately, independent of any static/CDN caching of the SSR markup.
+            if (typeof document !== 'undefined') {
+                const root = document.documentElement;
+                Object.entries(themeVarMap(merged)).forEach(([k, v]) => root.style.setProperty(k, v));
+            }
+        } catch {
+            // keep defaults
+        } finally {
+            setLoading(false);
+        }
+    };
 
-    // Initial load handled by state defaults
     useEffect(() => {
+        fetchCMSData();
     }, []);
 
     const getContent = (section: string, blockKey: string): CMSContent | undefined => {
@@ -138,6 +154,7 @@ export function CMSProvider({ children }: { children: ReactNode }) {
         <CMSContext.Provider
             value={{
                 settings,
+                config,
                 content,
                 banners,
                 loading,

@@ -358,6 +358,12 @@ export default function AdminLayout({
       permissionKey: 'modules'
     },
     {
+      title: 'Site Settings',
+      icon: 'ri-palette-line',
+      path: '/admin/settings',
+      permissionKey: 'settings'
+    },
+    {
       title: 'Staff',
       icon: 'ri-team-line',
       path: '/admin/staff',

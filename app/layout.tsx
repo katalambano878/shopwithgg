@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import { Montserrat } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
+import { fontVariables } from "@/lib/fonts";
+import { buildThemeCss } from "@/lib/site-config";
+import { getSiteConfig } from "@/lib/site-config.server";
 import "./globals.css";
-
-const montserrat = Montserrat({
-  weight: ["300", "400", "500", "600", "700"],
-  style: ["normal", "italic"],
-  subsets: ["latin"],
-  variable: "--font-montserrat",
-});
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://shopwithgg.com";
 
@@ -112,21 +107,28 @@ const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 // Google reCAPTCHA v3 Site Key
 const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const siteConfig = await getSiteConfig();
+  const themeCss = buildThemeCss(siteConfig);
+  const themeColor = siteConfig.theme.primary;
+
   return (
     <html lang="en">
       <head>
+        {/* Runtime theme — injected at SSR so colours/fonts apply with no flash */}
+        <style id="theme-vars" dangerouslySetInnerHTML={{ __html: themeCss }} />
+
         {/* PWA Meta Tags */}
-        <meta name="theme-color" content="#2C1D00" />
+        <meta name="theme-color" content={themeColor} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="ShopWithGG" />
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="msapplication-TileColor" content="#2C1D00" />
+        <meta name="msapplication-TileColor" content={themeColor} />
         <meta name="msapplication-tap-highlight" content="no" />
 
         {/* Apple Touch Icons */}
@@ -215,7 +217,7 @@ export default function RootLayout({
         />
       )}
 
-      <body className={`antialiased overflow-x-hidden pwa-body ${montserrat.variable} font-sans`} style={{ fontFamily: "var(--font-montserrat), system-ui, sans-serif" }}>
+      <body className={`antialiased overflow-x-hidden pwa-body ${fontVariables} font-sans`} style={{ fontFamily: "var(--font-sans), system-ui, sans-serif" }}>
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[10000] focus:px-6 focus:py-3 focus:bg-gray-900 focus:text-white focus:rounded-lg focus:font-semibold focus:shadow-lg"
