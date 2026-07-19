@@ -33,4 +33,7 @@ function createAdminClient() {
   });
 }
 
-export const supabaseAdmin = createAdminClient();
+// Cast: plain-PG compat client is structurally supabase-js-like but not identical
+// in TypeScript's eyes; without this, many existing `.map((r) => …)` call sites
+// fail with "parameter implicitly has an any type" under noImplicitAny.
+export const supabaseAdmin = createAdminClient() as ReturnType<typeof createSupabaseJsClient>;
