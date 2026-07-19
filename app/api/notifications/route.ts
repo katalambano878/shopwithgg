@@ -57,11 +57,15 @@ export async function POST(request: Request) {
             }
 
             const orderRef = payload.order_number || payload.id;
-            const { data: order, error: orderError } = await supabaseAdmin
+            // Avoid uuid cast errors on plain Postgres when orderRef is an order_number
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(orderRef));
+            let orderQuery = supabaseAdmin
                 .from('orders')
-                .select('id, order_number, created_at')
-                .or(`order_number.eq.${orderRef},id.eq.${orderRef}`)
-                .single();
+                .select('id, order_number, created_at');
+            orderQuery = isUUID
+                ? orderQuery.eq('id', orderRef)
+                : orderQuery.eq('order_number', orderRef);
+            const { data: order, error: orderError } = await orderQuery.single();
 
             if (orderError || !order) {
                 return NextResponse.json({ error: 'Order not found' }, { status: 404 });

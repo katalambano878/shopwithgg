@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { jwtVerify } from 'jose';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const usePlainPg = process.env.NEXT_PUBLIC_USE_PLAIN_PG === 'true';
 
 // ============================================================
 // Maintenance mode helper — cached for 15s to keep latency low
@@ -20,14 +22,13 @@ async function isMaintenanceModeEnabled(): Promise<boolean> {
         const url = `${supabaseUrl}/rest/v1/store_settings?key=eq.maintenance_mode&select=value&limit=1`;
         const res = await fetch(url, {
             headers: {
-                apikey: supabaseAnonKey,
-                Authorization: `Bearer ${supabaseAnonKey}`,
+                apikey: supabaseAnonKey || 'local-anon-key',
+                Authorization: `Bearer ${supabaseAnonKey || 'local-anon-key'}`,
             },
             cache: 'no-store',
         });
         const data: Array<{ value: unknown }> = await res.json();
         const raw = data?.[0]?.value;
-        // Value is JSONB — could be the literal string "true" or the boolean true.
         const enabled =
             raw === true ||
             raw === 'true' ||
@@ -39,13 +40,64 @@ async function isMaintenanceModeEnabled(): Promise<boolean> {
     }
 }
 
+function extractToken(request: NextRequest): string | undefined {
+    let token = request.cookies.get('sb-access-token')?.value;
+
+    if (!token) {
+        const projectRef = supabaseUrl?.split('//')[1]?.split('.')[0];
+        if (projectRef) {
+            token = request.cookies.get(`sb-${projectRef}-auth-token`)?.value;
+        }
+    }
+
+    if (!token) {
+        for (const [name, cookie] of request.cookies) {
+            if (name.startsWith('sb-') && (name.endsWith('-auth-token') || name.includes('auth'))) {
+                try {
+                    const parsed = JSON.parse(cookie.value);
+                    if (Array.isArray(parsed) && parsed[0]) {
+                        token = parsed[0];
+                    } else if (typeof parsed === 'object' && parsed.access_token) {
+                        token = parsed.access_token;
+                    } else if (typeof parsed === 'string') {
+                        token = parsed;
+                    }
+                } catch {
+                    token = cookie.value;
+                }
+                if (token) break;
+            }
+        }
+    }
+
+    return token;
+}
+
+async function verifyPlainPgAdmin(token: string): Promise<{ ok: boolean; userId?: string; role?: string }> {
+    const secret =
+        process.env.AUTH_JWT_SECRET ||
+        process.env.JWT_SECRET ||
+        process.env.SUPABASE_JWT_SECRET;
+    if (!secret) return { ok: false };
+
+    try {
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+        if (payload.typ === 'refresh') return { ok: false };
+        const userId = typeof payload.sub === 'string' ? payload.sub : undefined;
+        if (!userId) return { ok: false };
+        const appMeta = (payload.app_metadata || {}) as { role?: string };
+        const role = appMeta.role;
+        if (role !== 'admin' && role !== 'staff') return { ok: false };
+        return { ok: true, userId, role };
+    } catch {
+        return { ok: false };
+    }
+}
+
 export async function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
     const response = NextResponse.next();
 
-    // ============================================================
-    // Security headers for ALL routes
-    // ============================================================
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('X-Frame-Options', 'DENY');
     response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -61,38 +113,25 @@ export async function middleware(request: NextRequest) {
             return response;
         }
 
-        let token: string | undefined;
-        token = request.cookies.get('sb-access-token')?.value;
-
-        if (!token) {
-            const projectRef = supabaseUrl?.split('//')[1]?.split('.')[0];
-            token = request.cookies.get(`sb-${projectRef}-auth-token`)?.value;
-        }
-
-        if (!token) {
-            for (const [name, cookie] of request.cookies) {
-                if (name.startsWith('sb-') && (name.endsWith('-auth-token') || name.includes('auth'))) {
-                    try {
-                        const parsed = JSON.parse(cookie.value);
-                        if (Array.isArray(parsed) && parsed[0]) {
-                            token = parsed[0];
-                        } else if (typeof parsed === 'object' && parsed.access_token) {
-                            token = parsed.access_token;
-                        } else if (typeof parsed === 'string') {
-                            token = parsed;
-                        }
-                    } catch {
-                        token = cookie.value;
-                    }
-                    if (token) break;
-                }
-            }
-        }
+        const token = extractToken(request);
 
         if (!token) {
             const loginUrl = new URL('/admin/login', request.url);
             loginUrl.searchParams.set('redirect', pathname);
             return NextResponse.redirect(loginUrl);
+        }
+
+        if (usePlainPg) {
+            const verified = await verifyPlainPgAdmin(token);
+            if (!verified.ok) {
+                const loginUrl = new URL('/admin/login', request.url);
+                loginUrl.searchParams.set('redirect', pathname);
+                loginUrl.searchParams.set('error', 'session_expired');
+                return NextResponse.redirect(loginUrl);
+            }
+            if (verified.userId) response.headers.set('x-user-id', verified.userId);
+            if (verified.role) response.headers.set('x-user-role', verified.role);
+            return response;
         }
 
         if (supabaseAnonKey) {
@@ -149,13 +188,17 @@ export async function middleware(request: NextRequest) {
 
     // ============================================================
     // API + static + maintenance page itself: no maintenance gating
+    // Also skip compat-layer routes (rest/auth/storage) so they stay reachable.
     // ============================================================
     if (
         pathname.startsWith('/api/') ||
+        pathname.startsWith('/rest/') ||
+        pathname.startsWith('/auth/v1') ||
+        pathname.startsWith('/storage/') ||
         pathname.startsWith('/_next/') ||
         pathname.startsWith('/favicon') ||
         pathname === '/maintenance' ||
-        /\.[^/]+$/.test(pathname) // any path with a file extension (.png, .ico, .json…)
+        /\.[^/]+$/.test(pathname)
     ) {
         if (pathname.startsWith('/api/')) {
             response.headers.set('Cache-Control', 'no-store');
@@ -165,8 +208,6 @@ export async function middleware(request: NextRequest) {
 
     // ============================================================
     // Storefront: maintenance gate
-    // Admins/staff who logged in carry an `admin_session=1` cookie
-    // (set client-side by the admin layout) and bypass the gate.
     // ============================================================
     const inMaintenance = await isMaintenanceModeEnabled();
     if (inMaintenance) {
@@ -181,12 +222,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
     matcher: [
-        /*
-         * Match all request paths except for the ones starting with:
-         * - _next/static (static files)
-         * - _next/image  (image optimization files)
-         * - favicon.ico  (favicon file)
-         */
         '/((?!_next/static|_next/image|favicon.ico).*)',
     ],
 };
