@@ -33,5 +33,4 @@ function createAdminClient() {
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const supabaseAdmin: any = createAdminClient();
