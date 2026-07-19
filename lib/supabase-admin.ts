@@ -33,7 +33,5 @@ function createAdminClient() {
   });
 }
 
-// Cast: plain-PG compat client is structurally supabase-js-like but not identical
-// in TypeScript's eyes; without this, many existing `.map((r) => …)` call sites
-// fail with "parameter implicitly has an any type" under noImplicitAny.
-export const supabaseAdmin = createAdminClient() as ReturnType<typeof createSupabaseJsClient>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const supabaseAdmin: any = createAdminClient();
