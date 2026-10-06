@@ -58,15 +58,21 @@ export async function GET(request: Request) {
       else if (period === '7d') { const d = new Date(now); d.setDate(d.getDate() - 7); startDate = d.toISOString(); }
       else if (period === '30d') { const d = new Date(now); d.setDate(d.getDate() - 30); startDate = d.toISOString(); }
 
-      let query = supabaseAdmin
+      let ordersQuery = supabaseAdmin
+        .from('orders')
+        .select('id')
+        .eq('payment_status', 'paid')
+        .neq('status', 'cancelled');
+      if (startDate) ordersQuery = ordersQuery.gte('created_at', startDate);
+      const { data: paidOrders, error: ordersError } = await ordersQuery;
+      if (ordersError) throw ordersError;
+      const orderIds = (paidOrders || []).map((order: { id: string }) => order.id);
+      if (orderIds.length === 0) return NextResponse.json({ items: [] });
+
+      const { data, error } = await supabaseAdmin
         .from('order_items')
-        .select(`quantity, product_name, product_id, variant_name, total_price, orders!inner(id, created_at, status, payment_status)`)
-        .eq('orders.payment_status', 'paid')
-        .neq('orders.status', 'cancelled');
-
-      if (startDate) query = query.gte('orders.created_at', startDate);
-
-      const { data, error } = await query;
+        .select('quantity, product_name, product_id, variant_name, total_price, order_id')
+        .in('order_id', orderIds);
       if (error) throw error;
       return NextResponse.json({ items: data || [] });
     }

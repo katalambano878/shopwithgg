@@ -85,7 +85,7 @@ export default function ProductSalesStats({ isOpen, onClose }: { isOpen: boolean
                     existing.revenue += (item.total_price || 0);
                     entry.variants.set(variantName, existing);
 
-                    const orderId = item.orders?.id;
+                    const orderId = item.order_id || item.orders?.id;
                     if (orderId && !entry._orderIds.has(orderId)) {
                         entry.ordersCount++;
                         entry._orderIds.add(orderId);

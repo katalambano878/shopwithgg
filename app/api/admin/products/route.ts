@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       .select(`
         *,
         categories(name),
-        product_variants(count),
+        product_variants(id),
         product_images(url, position)
       `);
 
@@ -95,7 +95,7 @@ export async function GET(request: Request) {
         category: p.categories?.name || 'Uncategorized',
         image: firstImageUrl,
         product_images: images,
-        variantsCount: p.product_variants?.[0]?.count || 0,
+        variantsCount: Array.isArray(p.product_variants) ? p.product_variants.length : 0,
         stock: p.quantity,
         sales: 0,
         rating: p.rating_avg || 0,
