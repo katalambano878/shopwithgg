@@ -592,12 +592,13 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
     let hasReverse = false;
     for (const e of parsed.embeds) {
       let fk = e.fkColumn;
-      if (!fk) {
+      const ownedHere = !!(fk && (FK_MAP[this.table] || []).some((x) => x.column === fk));
+      if (!fk || !ownedHere) {
         const fwd = (FK_MAP[this.table] || []).find((x) => x.foreignTable === e.table);
         if (fwd) fk = fwd.column;
         else hasReverse = true;
       }
-      if (fk) cols.add(ident(fk));
+      if (fk && (FK_MAP[this.table] || []).some((x) => x.column === fk)) cols.add(ident(fk));
     }
     // reverse embeds join on this table's id — only fetch it when needed
     // (some tables, e.g. settings, have no id column)
