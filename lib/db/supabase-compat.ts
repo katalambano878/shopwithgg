@@ -417,6 +417,13 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
       like: "LIKE",
       ilike: "ILIKE",
     };
+    if (bare === "cs") {
+      params.push(value);
+      const isJsonb = !!JSONB_COLUMNS[this.table]?.has(col);
+      return isJsonb
+        ? `${ident(col)} @> $${params.length}::jsonb`
+        : `${ident(col)} @> $${params.length}`;
+    }
     const o = sqlOp[bare];
     if (!o) throw new Error(`Unsupported operator: ${op}`);
     params.push(value);
@@ -609,11 +616,16 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
       // it's a reverse has-many (array).
       let fk = embed.fkColumn;
       let embedTable = embed.table;
+      // `product_images!product_id(...)` names the FK on the child table.
+      // That is a reverse embed, not a column on the parent.
+      let reverseFkHint: string | undefined;
       if (fk) {
-        // fk-column form: prefer the owning table's own FK edge to disambiguate
-        // (template_id -> sms_templates vs email_templates depends on the table)
         const own = (FK_MAP[this.table] || []).find((e) => e.column === fk);
         if (own) embedTable = own.foreignTable;
+        else {
+          reverseFkHint = fk;
+          fk = undefined;
+        }
       } else {
         const fwd = (FK_MAP[this.table] || []).find((e) => e.foreignTable === embed.table);
         if (fwd) fk = fwd.column;
@@ -645,7 +657,7 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
       } else {
         // reverse embed (has-many): related.<table>_fk -> current.id (array)
         const edge = this.findReverseEdge(embedTable);
-        const fkCol = edge?.column ?? `${singularize(this.table)}_id`;
+        const fkCol = reverseFkHint || edge?.column || `${singularize(this.table)}_id`;
         const parentIds = Array.from(new Set(rows.map((r) => r.id).filter(Boolean)));
         const wantId = embedWantsId(embed.select);
         const wantFk = embed.select.star || embed.select.columns.includes(fkCol);
@@ -664,9 +676,16 @@ class QueryBuilder implements PromiseLike<{ data: any; error: any; count: number
         for (const r of related) {
           const k = r[fkCol];
           if (!grouped.has(k)) grouped.set(k, []);
-          if (!wantFk) delete r[fkCol];
-          if (!wantId) delete r.id;
           grouped.get(k)!.push(r);
+        }
+        for (const list of grouped.values()) {
+          if (list.some((row) => row.position != null)) {
+            list.sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0));
+          }
+          for (const r of list) {
+            if (!wantFk) delete r[fkCol];
+            if (!wantId) delete r.id;
+          }
         }
         for (const r of rows) r[embed.alias] = grouped.get(r.id) ?? [];
       }
@@ -942,12 +961,23 @@ export function applyPostgrestParams(
       continue;
     }
     if (key === "order") {
+      const dirWords = new Set(["asc", "desc", "nullsfirst", "nullslast"]);
       for (const part of raw.split(",")) {
-        const bits = part.trim().split(".");
+        const bits = part.trim().split(".").filter(Boolean);
+        if (bits.length === 0) continue;
+        // Embedded order is `table.column.asc`. Ordering the parent by that
+        // name makes Postgres look for a column that is not on this table.
+        if (bits.length >= 3 && !dirWords.has(bits[1].toLowerCase())) continue;
         const col = bits[0];
-        const ascending = bits[1] !== "desc";
-        const nullsFirst = bits.includes("nullsfirst");
-        qb.order(col, { ascending, nullsFirst });
+        if (!PG_IDENT.test(col)) continue;
+        const ascending = (bits[1] || "asc").toLowerCase() !== "desc";
+        const nullsToken = bits.find((bit) => dirWords.has(bit.toLowerCase()) && bit.toLowerCase().startsWith("nulls"));
+        qb.order(
+          col,
+          nullsToken
+            ? { ascending, nullsFirst: nullsToken.toLowerCase() === "nullsfirst" }
+            : { ascending }
+        );
       }
       continue;
     }

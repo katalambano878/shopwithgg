@@ -69,11 +69,10 @@ function ShopContent() {
               .from('products')
               .select(`
                 *,
-                categories!inner(name, slug),
-                product_images!product_id(url, position),
+                categories(name, slug),
+                product_images(url, position),
                 product_variants(id, name, price, quantity, option1, option2, image_url)
-              `, { count: 'exact' })
-              .order('position', { foreignTable: 'product_images', ascending: true });
+              `, { count: 'exact' });
 
             if (search) {
               query = query.ilike('name', `%${search}%`);
@@ -83,14 +82,13 @@ function ShopContent() {
               const categoryObj = categories.find(c => c.slug === selectedCategory);
 
               if (categoryObj) {
-                const targetSlugs = [selectedCategory];
-                const childSlugs = categories
-                  .filter(c => c.parent_id === categoryObj.id)
-                  .map(c => c.slug);
-                targetSlugs.push(...childSlugs);
-                query = query.in('categories.slug', targetSlugs);
-              } else {
-                query = query.eq('categories.slug', selectedCategory);
+                const targetIds = [
+                  categoryObj.id,
+                  ...categories
+                    .filter(c => c.parent_id === categoryObj.id)
+                    .map(c => c.id),
+                ];
+                query = query.in('category_id', targetIds);
               }
             }
 
@@ -140,13 +138,16 @@ function ShopContent() {
             const totalVariantStock = hasVariants ? variants.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0) : 0;
             const effectiveStock = hasVariants ? totalVariantStock : p.quantity;
             const colorVariants: ColorVariant[] = colorSwatchesFromProduct(p);
+            const images = [...(p.product_images || [])].sort(
+              (a: { position?: number }, b: { position?: number }) => (a.position ?? 0) - (b.position ?? 0)
+            );
             return {
               id: p.id,           // Product UUID for cart/orders
               slug: p.slug,       // Slug for navigation
               name: p.name,
               price: p.price,
               originalPrice: p.compare_at_price,
-              image: p.product_images?.[0]?.url || 'https://via.placeholder.com/800x800?text=No+Image',
+              image: images[0]?.url || 'https://via.placeholder.com/800x800?text=No+Image',
               rating: p.rating_avg || 0,
               reviewCount: 0, // Need to implement reviews relation
               badge: p.compare_at_price > p.price ? 'Sale' : undefined,

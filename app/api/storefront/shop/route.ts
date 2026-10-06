@@ -64,7 +64,14 @@ export async function GET(request: Request) {
       }
 
       if (params.categoryFilterSlugs && params.categoryFilterSlugs.length > 0) {
-        query = query.in('categories.slug', params.categoryFilterSlugs);
+        const { data: matchedCategories, error: categoryLookupError } = await supabaseAdmin
+          .from('categories')
+          .select('id')
+          .in('slug', params.categoryFilterSlugs);
+        if (categoryLookupError) return { data: null, error: categoryLookupError, count: null };
+        const categoryIds = (matchedCategories || []).map((category: { id: string }) => category.id);
+        if (categoryIds.length === 0) return { data: [], error: null, count: 0 };
+        query = query.in('category_id', categoryIds);
       }
 
       if (priceMax < 5000) {
