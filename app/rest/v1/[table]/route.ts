@@ -16,6 +16,9 @@ function corsHeaders(): HeadersInit {
     "Access-Control-Allow-Headers":
       "authorization, apikey, content-type, prefer, x-client-info, accept-profile, content-profile",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
+    // The shop total is read from Content-Range. Browsers hide that header
+    // on www vs apex requests unless it is explicitly exposed.
+    "Access-Control-Expose-Headers": "Content-Range, Content-Location",
   };
 }
 
