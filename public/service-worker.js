@@ -1,5 +1,5 @@
-// ShopWithGG - Service Worker v3.0
-const CACHE_VERSION = 'sl-v3.0';
+// ShopWithGG - Service Worker v4.0
+const CACHE_VERSION = 'sl-v4.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
 const IMAGE_CACHE = `images-${CACHE_VERSION}`;
@@ -8,11 +8,6 @@ const API_CACHE = `api-${CACHE_VERSION}`;
 // Core app shell files to pre-cache
 const STATIC_ASSETS = [
   '/',
-  '/shop',
-  '/cart',
-  '/wishlist',
-  '/account',
-  '/categories',
   '/offline',
   '/shopwithgg-logo.png',
 ];
@@ -34,7 +29,7 @@ async function trimCache(cacheName, maxItems) {
 
 // Install: pre-cache static assets
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing v3.0...');
+  console.log('[SW] Installing v4.0...');
   event.waitUntil(
     caches.open(STATIC_CACHE)
       .then((cache) => {
@@ -51,7 +46,7 @@ self.addEventListener('install', (event) => {
 
 // Activate: clean old caches
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating v3.0...');
+  console.log('[SW] Activating v4.0...');
   event.waitUntil(
     caches.keys()
       .then((keys) => {
@@ -115,27 +110,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Strategy: Storefront API - Network First with cache fallback (short TTL)
-  if (url.pathname.startsWith('/api/storefront')) {
+  // Product / auth / storage JSON and other data APIs: network only.
+  // Never cache empty or stale catalogue responses (that produced a "0 products"
+  // shop page for returning visitors). Image requests under /storage/ already
+  // used the image strategy above.
+  const isDataApi =
+    url.pathname.startsWith('/rest/v1') ||
+    url.pathname.startsWith('/auth/v1') ||
+    url.pathname.startsWith('/storage/v1') ||
+    url.pathname.startsWith('/api/');
+  if (isDataApi) {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const responseClone = response.clone();
-            caches.open(API_CACHE).then((cache) => {
-              cache.put(request, responseClone);
-              trimCache(API_CACHE, API_CACHE_LIMIT);
-            });
-          }
-          return response;
+      fetch(request).catch(() =>
+        new Response(JSON.stringify({ error: 'Offline' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
         })
-        .catch(() => {
-          return caches.match(request).then((cached) => {
-            return cached || new Response(JSON.stringify({ error: 'Offline' }), {
-              headers: { 'Content-Type': 'application/json' }
-            });
-          });
-        })
+      )
     );
     return;
   }
@@ -185,11 +176,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Default: Network First
+  // Default: Network First. Do not write API-like JSON into the dynamic cache.
   event.respondWith(
     fetch(request)
       .then((response) => {
-        if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json') || contentType.includes('application/vnd.pgrst');
+        if (response.ok && !isJson) {
           const responseClone = response.clone();
           caches.open(DYNAMIC_CACHE).then((cache) => {
             cache.put(request, responseClone);

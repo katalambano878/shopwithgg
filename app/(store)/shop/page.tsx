@@ -15,7 +15,8 @@ function ShopContent() {
 
   // State
   const [products, setProducts] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([{ id: 'all', name: 'All Products', count: 0 }]);
+  const [categories, setCategories] = useState<any[]>([{ id: 'all', name: 'All Products', slug: 'all', parent_id: null, count: 0 }]);
+  const [categoriesReady, setCategoriesReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [totalProducts, setTotalProducts] = useState(0);
 
@@ -28,13 +29,13 @@ function ShopContent() {
   const [page, setPage] = useState(1);
   const productsPerPage = 9;
 
-  // Initialize from URL params
+  // Initialize from URL params. Strip a leading slash so "?category=/baby-kids"
+  // still matches the category slug.
   useEffect(() => {
-    const category = searchParams.get('category');
+    const rawCategory = (searchParams.get('category') || '').replace(/^\/+/, '').trim();
     const sort = searchParams.get('sort');
-    const search = searchParams.get('search');
 
-    if (category) setSelectedCategory(category);
+    setSelectedCategory(rawCategory || 'all');
     if (sort) setSortBy(sort);
   }, [searchParams]);
 
@@ -45,23 +46,61 @@ function ShopContent() {
         const res = await fetch('/api/storefront/categories');
         if (res.ok) {
           const data = await res.json();
-          if (data) setCategories(data);
+          if (Array.isArray(data)) {
+            setCategories([
+              { id: 'all', name: 'All Products', slug: 'all', parent_id: null },
+              ...data.filter((c: any) => c && c.id !== 'all'),
+            ]);
+          }
         }
       } catch (err) {
         console.error('Error fetching categories:', err);
+      } finally {
+        setCategoriesReady(true);
       }
     }
     fetchCategories();
   }, []);
 
-  // Fetch Products
+  // Fetch Products. Wait until categories have loaded so a category URL cannot
+  // cache an unfiltered first response under the category key. Abort in-flight
+  // requests when filters change, and never apply a stale response.
   useEffect(() => {
+    if (!categoriesReady) return;
+
+    const ac = new AbortController();
+    let cancelled = false;
+
     async function fetchProducts() {
       setLoading(true);
       try {
         const search = searchParams.get('search');
+        const categoryObj =
+          selectedCategory !== 'all'
+            ? categories.find((c) => c.slug === selectedCategory || c.id === selectedCategory)
+            : null;
+        const unresolvedCategory = selectedCategory !== 'all' && !categoryObj;
+        const targetIds = categoryObj
+          ? [
+              categoryObj.id,
+              ...categories
+                .filter((c) => c.parent_id === categoryObj.id)
+                .map((c) => c.id),
+            ]
+          : [];
 
-        const cacheKey = `shop:${selectedCategory}:${search}:${priceRange.join('-')}:${selectedRating}:${sortBy}:${page}`;
+        // Include resolved category ids in the key so an unfiltered "all"
+        // result can never be reused for a specific category.
+        const cacheKey = `shop:${selectedCategory}:${targetIds.slice().sort().join(',') || 'all'}:${search || ''}:${priceRange.join('-')}:${selectedRating}:${sortBy}:${page}`;
+
+        if (unresolvedCategory) {
+          if (!cancelled) {
+            setProducts([]);
+            setTotalProducts(0);
+          }
+          return;
+        }
+
         const { data, count, error } = await cachedQuery<{ data: any; count: any; error: any }>(
           cacheKey,
           async () => {
@@ -72,24 +111,15 @@ function ShopContent() {
                 categories(name, slug),
                 product_images(url, position),
                 product_variants(id, name, price, quantity, option1, option2, image_url)
-              `, { count: 'exact' });
+              `, { count: 'exact' })
+              .abortSignal(ac.signal);
 
             if (search) {
               query = query.ilike('name', `%${search}%`);
             }
 
-            if (selectedCategory !== 'all') {
-              const categoryObj = categories.find(c => c.slug === selectedCategory);
-
-              if (categoryObj) {
-                const targetIds = [
-                  categoryObj.id,
-                  ...categories
-                    .filter(c => c.parent_id === categoryObj.id)
-                    .map(c => c.id),
-                ];
-                query = query.in('category_id', targetIds);
-              }
+            if (targetIds.length) {
+              query = query.in('category_id', targetIds);
             }
 
             if (priceRange[1] < 5000) {
@@ -128,7 +158,11 @@ function ShopContent() {
           2 * 60 * 1000
         );
 
-        if (error) throw error;
+        if (cancelled) return;
+        if (error) {
+          if (error.name === 'AbortError' || /abort/i.test(error.message || '')) return;
+          throw error;
+        }
 
         if (data) {
           const formattedProducts = data.map((p: any) => {
@@ -163,15 +197,20 @@ function ShopContent() {
           setProducts(formattedProducts);
           setTotalProducts(count || 0);
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (cancelled || err?.name === 'AbortError' || /abort/i.test(err?.message || '')) return;
         console.error('Error fetching products:', err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchProducts();
-  }, [selectedCategory, priceRange, selectedRating, sortBy, page, searchParams, categories]);
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [selectedCategory, priceRange, selectedRating, sortBy, page, searchParams, categories, categoriesReady]);
 
   const totalPages = Math.ceil(totalProducts / productsPerPage);
 
